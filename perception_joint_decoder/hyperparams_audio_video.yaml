@@ -1,0 +1,153 @@
+# Seed needs to be set at top of yaml, before objects with parameters are made
+seed: 1234
+__set_seed: !apply:torch.manual_seed [1234]
+
+skip_training: True
+
+output_folder: output_folder_two_decoders_audio_video
+label_encoder_file: !ref <output_folder>/label_encoder.txt
+
+vit_model_path: google/vit-base-patch16-224-in21k
+
+train_log: !ref <output_folder>/train_log.txt
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+    save_file: !ref <output_folder>/train_log.txt
+save_folder: !ref <output_folder>/save
+
+wav2vec2_hub: audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim
+wav2vec2_folder: !ref <save_folder>/wav2vec2_checkpoint
+
+# Training params
+n_epochs: 10
+teacher_forcing_ratio: 0.5
+
+dataloader_options:
+    batch_size: 8
+    shuffle: False
+
+test_dataloader_options:
+    batch_size: 1
+    shuffle: False
+
+lr: 0.005
+vit_lr: 0.005
+
+freeze_wav2vec2: True
+freeze_wav2vec2_conv: True
+
+wav2vec2: !new:speechbrain.lobes.models.huggingface_transformers.wav2vec2.Wav2Vec2
+# wav2vec2: !new:speechbrain.lobes.models.huggingface_wav2vec.HuggingFaceWav2Vec2
+    source: !ref <wav2vec2_hub>
+    output_norm: True
+    freeze: !ref <freeze_wav2vec2>
+    freeze_feature_extractor: !ref <freeze_wav2vec2_conv>
+    save_path: !ref <wav2vec2_folder>
+    output_all_hiddens: True
+
+avg_pool: !new:speechbrain.nnet.pooling.StatisticsPooling
+    return_std: False
+
+label_encoder: !new:speechbrain.dataio.encoder.CategoricalEncoder
+
+n_classes: 1
+dropout_prob: 0.1
+
+dropout: !new:torch.nn.Dropout
+    p: !ref <dropout_prob>
+
+gru_decoder_1: !new:speechbrain.nnet.RNN.AttentionalRNNDecoder
+    enc_dim: 1024
+    input_size: 1
+    rnn_type: gru
+    attn_type: location
+    hidden_size: 64
+    attn_dim: 128
+    num_layers: 1
+    scaling: 1.0
+    channels: 10
+    kernel_size: 100
+    re_init: True
+
+gru_decoder_2: !new:speechbrain.nnet.RNN.AttentionalRNNDecoder
+    enc_dim: 768
+    input_size: 1
+    rnn_type: gru
+    attn_type: location
+    hidden_size: 64
+    attn_dim: 128
+    num_layers: 1
+    scaling: 1.0
+    channels: 10
+    kernel_size: 100
+    re_init: True
+
+lin_proj_audio: !new:torch.nn.Linear
+    in_features: 1024
+    out_features: 768
+
+lin_proj_video: !new:torch.nn.Linear
+    in_features: 768
+    out_features: 768
+
+lin_att_audio: !new:torch.nn.Linear
+    in_features: 64
+    out_features: 64
+
+lin_att_video: !new:torch.nn.Linear
+    in_features: 64
+    out_features: 64
+
+output_layer_1: !new:torch.nn.Linear
+    in_features: 128
+    out_features: !ref <n_classes>
+
+vit_model: !new:vit_model.ViT
+    model_path: !ref <vit_model_path>
+
+opt_class: !name:torch.optim.Adam
+    lr: !ref <lr>
+
+vit_opt_class: !name:torch.optim.Adam
+    lr: !ref <vit_lr>
+
+lr_annealing: !new:speechbrain.nnet.schedulers.NewBobScheduler
+    initial_value: !ref <lr>
+    improvement_threshold: 0.0025
+    annealing_factor: 0.9
+    patient: 0
+
+lr_annealing_vit: !new:speechbrain.nnet.schedulers.NewBobScheduler
+    initial_value: !ref <vit_lr>
+    improvement_threshold: 0.0025
+    annealing_factor: 0.9
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <n_epochs>
+
+compute_cost: !name:speechbrain.nnet.losses.mse_loss
+l1_cost: !name:speechbrain.nnet.losses.l1_loss
+
+error_stats: !name:speechbrain.utils.metric_stats.MetricStats
+    metric: !name:speechbrain.nnet.losses.classification_error
+        reduction: batch
+
+modules:
+    lin_att_audio: !ref <lin_att_audio>
+    lin_att_video: !ref <lin_att_video>
+    gru_decoder_1: !ref <gru_decoder_1>
+    gru_decoder_2: !ref <gru_decoder_2>
+    vit_model: !ref <vit_model>
+    wav2vec2: !ref <wav2vec2>
+    output_layer_1: !ref <output_layer_1>
+
+model: !new:torch.nn.ModuleList
+    - [!ref <output_layer_1>, !ref <lin_att_audio>, !ref <lin_att_video>, !ref <gru_decoder_1>, !ref <gru_decoder_2>]
+
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+    checkpoints_dir: !ref <save_folder>
+    recoverables:
+        model: !ref <model>
+        vit_model: !ref <vit_model>
+        wav2vec2: !ref <wav2vec2>
+        lr_annealing_output: !ref <lr_annealing>
+        counter: !ref <epoch_counter>
