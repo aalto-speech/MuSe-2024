@@ -5,7 +5,6 @@ results
 *DS_Store
 __pycache__
 .idea
-*.sh
 *.out
 hp_search
 preds
