@@ -1,0 +1,16 @@
+logs
+results
+
+*code-workspace
+*DS_Store
+__pycache__
+.idea
+*.out
+hp_search
+preds
+baseline_results
+venv/
+*.csv
+*.envrc
+*#
+test_scripts/
